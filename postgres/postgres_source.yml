@@ -1,0 +1,252 @@
+---
+- name: Install PostgreSQL from source
+  hosts: postgres
+  become: yes
+  gather_facts: yes
+  vars:
+    postgresql_version: "14.11"  # Adjust the version as needed
+    postgresql_src_dir: "/usr/local/src/postgresql-{{ postgresql_version }}"
+    postgresql_install_dir: "/usr/local/pgsql"
+    postgresql_data_dir: "/var/lib/pgsql/{{ postgresql_version }}/data"
+
+  vars_files:
+   - vars.yml
+
+  tasks:
+
+    - name: Ensure destination directory exists
+      ansible.builtin.file:
+        path: "{{ postgresql_src_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Install required dependencies
+      package:
+        name: 
+          - gcc
+          - make
+          - "{{ 'zlib1g-dev' if ansible_os_family == 'Debian' else 'zlib-devel' }}"
+          - "{{ 'libreadline-dev' if ansible_facts['os_family'] == 'Debian' else 'readline-devel' }}"
+          - "{{ 'libssl-dev' if ansible_facts['os_family'] == 'Debian' else 'openssl-devel' }}"
+          - "{{ 'libxml2-dev' if ansible_facts['os_family'] == 'Debian' else 'libxml2-devel' }}"
+          - "{{ 'libxslt-dev' if ansible_facts['os_family'] == 'Debian' else 'libxslt-devel' }}"
+          - "{{ 'perl' if ansible_facts['os_family'] == 'Debian' else 'perl-ExtUtils-Embed' }}"
+          - "{{ 'libuuid-devel' if ansible_facts['os_family'] == 'RedHat' else 'uuid-dev' }}" # Install libuuid-devel on RedHat/CentOS, uuid-dev on Debian/Ubuntu
+
+
+    - name: Download PostgreSQL source code
+      get_url:
+        url: "https://ftp.postgresql.org/pub/source/v{{ postgresql_version }}/postgresql-{{ postgresql_version }}.tar.gz"
+        dest: "/tmp/postgresql-{{ postgresql_version }}.tar.gz"
+
+    #- name: Make source dir
+     # command: mkdir "{{ postgresql_src_dir }}"
+      #when: not "postgresql_src_dir".exists 
+    
+    - name: Extract PostgreSQL source code
+      ansible.builtin.unarchive:
+        src: "/tmp/postgresql-{{ postgresql_version }}.tar.gz"
+       # creates: "{{ postgresql_src_dir }}"
+        dest: /usr/local/src/
+        remote_src: yes
+        
+
+
+
+    - name: Verify the presence of 'configure' script
+      stat:
+        path: "/usr/local/src/postgresql-{{ postgresql_version }}/configure"
+      register: configure_script
+
+    - name: Fail if 'configure' script is missing
+      fail:
+        msg: "Configure script is missing in the extracted PostgreSQL source directory"
+      when: not configure_script.stat.exists
+
+    - name: Configure PostgreSQL
+      command: >
+        ./configure --prefix={{ postgresql_install_dir }}
+                    --with-openssl
+                    --with-libxml
+                    --with-libxslt
+                    --with-uuid=e2fs
+                    --with-includes={{ postgresql_install_dir }}/include
+                    --with-libraries={{ postgresql_install_dir }}/lib
+      args:
+        chdir: "{{ postgresql_src_dir }}"
+      register: configure_output
+
+    - name: Own Install dir
+      become: yes
+      command: 
+       chown ubuntu:ubuntu -R "{{ postgresql_install_dir }}"
+
+
+    - name: Compile PostgreSQL
+      command: make
+      args:
+        chdir: "{{ postgresql_src_dir }}"
+      register: compile_output
+
+    - name: Install PostgreSQL
+      command: make install
+      args:
+        chdir: "{{ postgresql_src_dir }}"
+      register: install_output
+
+     
+#    - name: Creating postgres group
+ #     ansible.builtin.group:
+  #     name: postgres
+   #    state: present
+       
+ 
+#    - name: Adding postgres user
+ #     ansible.builtin.user:
+  #     name: postgres
+   #    group: postgres
+    #   state: present
+       
+
+    - name: Owning the data directory
+      become: yes
+      command: 
+       chown ubuntu:ubuntu -R "{{ postgresql_data_dir }}"
+       
+    - name: Ensure destination directory exists
+      become: yes
+      ansible.builtin.file:
+        path: "{{ postgresql_data_dir }}"
+        state: directory
+        mode: '750'
+
+    - name: Initialize PostgreSQL database
+      become: yes
+      become_user: ubuntu
+      command: "{{ postgresql_install_dir }}/bin/initdb -D {{ postgresql_data_dir }} -U postgres"
+      args:
+        creates: "{{ postgresql_data_dir }}/PG_VERSION"
+
+
+    - name: Create symlinks for binaries
+      become: yes
+      ansible.builtin.file:
+       src: "/usr/local/pgsql/bin/{{ item }}"
+       dest: "/usr/local/bin/{{ item }}"
+       owner: ubuntu
+       group: ubuntu
+       state: link
+      loop:
+            - clusterdb          
+            - dropdb             
+            - initdb             
+            - pg_basebackup
+            - pg_controldata
+            - pg_dumpall
+            - pg_recvlogical
+            - pg_rewind
+            - pg_upgrade
+            - pgbench
+            - psql               
+            - createdb
+            - dropuser
+            - pg_amcheck
+            - pg_checksums
+            - pg_ctl
+            - pg_isready
+            - pg_resetwal
+            - pg_test_fsync
+            - pg_verifybackup
+            - postgres
+            - reindexdb          
+            - createuser
+            - ecpg
+            - pg_archivecleanup
+            - pg_config
+            - pg_dump
+            - pg_receivewal
+            - pg_restore
+            - pg_test_timing
+            - pg_waldump
+            - postmaster
+            - vacuumdb         
+    
+    - name: Copy custom systemd service unit file
+      ansible.builtin.copy:
+        src: postgresql.service
+        dest: /etc/systemd/system/
+        mode: 0644
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: Enable PostgreSQL service
+      ansible.builtin.service:
+        name: postgresql
+        state: started
+        enabled: yes
+
+
+    - name: Start PostgreSQL service
+      become: yes
+      become_user: postgres
+      systemd:
+        name: postgresql
+        state: started
+        enabled: yes
+
+
+    - name: "Create app database"
+      postgresql_db:
+        state: present
+        name: "{{ db_name }}"
+        login_unix_socket: /tmp/     
+        login_user: postgres
+
+
+    - name: "Create db user"
+      postgresql_user:
+        state: present
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        login_unix_socket: /tmp/ 
+        login_user: postgres
+        db: "{{ db_name }}"
+
+    - name: Owning the db from postgres user to db user
+      community.postgresql.postgresql_owner:
+       db: "{{ db_name }}"
+       login_unix_socket: /tmp/
+       new_owner: "{{ db_user }}"
+       obj_name: "{{ db_name }}"
+       obj_type: database
+      
+
+    - name: "Grant db user access to app db"
+      postgresql_privs:
+        type: database
+        db: "{{ db_name }}"
+        roles: "{{ db_user }}"
+        grant_option: no
+        privs: all
+        login_unix_socket: /tmp/ 
+        login_user: postgres
+        state: present
+
+    #- name: "Allow md5 connection for the db user"
+     # postgresql_pg_hba:
+      #  dest: "/etc/postgresql/14/main/pg_hba.conf"
+       # contype: host
+        #databases: all
+        #method: md5
+        #users: "{{ db_user }}"
+        #create: true
+     
+    - name: Restart PostgreSQL service
+      become: yes
+      systemd:
+        name: postgresql
+        state: restarted
+        enabled: yes
+

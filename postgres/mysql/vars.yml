@@ -1,0 +1,7 @@
+root_user: "root"
+root_host: "localhost"
+root_pass: "test@123"
+db_name: "bobdata"
+user: "bob"
+pass: "12345"
+grants: "bobdata.*:ALL"

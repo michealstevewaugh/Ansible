@@ -1,0 +1,13 @@
+[Unit]
+Description=MySQL Database Server
+After=network.target
+
+[Service]
+Type=forking
+User=mysql
+Group=mysql
+ExecStart=/usr/local/mysql/bin/mysqld --defaults-file=/etc/my.cnf --user=mysql
+ExecStop=/usr/local/mysql/bin/mysqladmin -u root -p shutdown
+
+[Install]
+WantedBy=multi-user.target

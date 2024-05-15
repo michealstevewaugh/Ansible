@@ -1,0 +1,171 @@
+---
+- name: mysql installation
+  hosts: postgres
+  become: yes
+  gather_facts: yes
+  vars:
+   mysql_version: "8.0.33"
+   mysql_src_dir: "/usr/local/mysql"
+   mysql_data_dir: "/var/lib/mysql"
+  tasks:
+  
+    - name: Install libraries
+      apt:
+          name: libaio1
+          state: present
+      when: ansible_facts.os_family == 'Debian'   
+
+    - name: Install libraries
+      yum:
+          name: libaio,ncurses-compat-libs
+          state: present
+      when: ansible_facts.os_family == 'RedHat'
+
+
+    - name: Install PYMySQL
+      pip:
+       name: pymysql
+       state: present
+
+    - name: creating group for mysql
+      ansible.builtin.group:
+       name: mysql
+       state: present
+
+    - name: creating user for mysql
+      ansible.builtin.user:
+       name: mysql
+       group: mysql
+       shell: /bin/false
+       state: present
+
+    - name: Download Mysql
+      get_url:
+       url: "https://cdn.mysql.com/archives/mysql-8.0/mysql-{{ mysql_version }}-linux-glibc2.28-x86_64.tar.gz"
+       dest: "/tmp/"
+
+    - name: Unzipping the archives
+      become: yes
+      ansible.builtin.unarchive:
+       src: "/tmp/mysql-{{ mysql_version }}-linux-glibc2.28-x86_64.tar.gz"
+       dest: "/usr/local/"
+       remote_src: yes
+
+
+    - name: creating symlink for mysql
+      ansible.builtin.file:
+       src: "/usr/local/mysql-{{ mysql_version }}-linux-glibc2.28-x86_64"
+       dest: "/usr/local/mysql"
+       owner: mysql
+       group: mysql
+       state: link
+
+    - name: creating a data directory
+      ansible.builtin.file:
+        path: "{{ mysql_data_dir }}"
+        state: directory
+        owner: mysql
+        group: mysql
+        mode: '0750'
+
+    - name: Setting up the configuration before init
+      copy:
+       src: my.cnf.j2
+       dest: /etc/my.cnf
+       
+
+#    - name: Initializing the DB
+ #     command: /usr/local/mysql/bin/mysqld --initialize --user=mysql
+
+    - name: Copy custom systemd service unit file
+      ansible.builtin.copy:
+        src: mysql.service
+        dest: /etc/systemd/system/
+        mode: 0644
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: Enable MySQL service
+      command: systemctl enable mysql
+
+    - name: Start MySQL service
+      become: yes
+      shell: "/usr/local/mysql/bin/mysqld_safe --defaults-file=/etc/my.cnf &"
+      
+     
+
+   # - name: Check MySQL service status
+    #  ansible.builtin.systemd:
+     #   name: mysql
+      #  state: started
+     # register: mysql_service_status
+      #failed_when: not mysql_service_status.changed
+
+   # - name: Print MySQL service status
+    #  ansible.builtin.debug:
+     #   msg: "MySQL service is started"
+
+
+    - name: Create symlink for mysql bins
+      become: yes
+      ansible.builtin.file:
+       src: '/usr/local/mysql/bin/{{ item }}'
+       dest: '/usr/local/bin/{{ item }}'
+       owner: mysql
+       group: mysql
+       force: yes
+       state: link
+      loop:
+
+          - ibd2sdi
+          - my_print_defaults
+          - myisamlog
+          - mysql_config
+          - mysql_secure_installation
+          - mysql_upgrade
+          - mysqlcheck
+          - mysqld_multi
+          - mysqldumpslow
+          - mysqlshow
+          - zlib_decompress
+          - innochecksum
+          - myisam_ftdump
+          - myisampack
+          - mysql_config_editor
+          - mysql_ssl_rsa_setup
+          - mysqladmin
+          - mysqld
+          - mysqld_safe
+          - mysqlimport
+          - mysqlslap
+          - lz4_decompress
+          - myisamchk
+          - mysql
+          - mysql_migrate_keyring
+          - mysql_tzinfo_to_sql
+          - mysqlbinlog
+          - mysqld-debug
+          - mysqldump
+          - mysqlpump
+          - perror
+
+    - name: Create a new database with name 'bobdata'
+      community.mysql.mysql_db:
+       name: bobdata
+       state: present
+     #  host: ec2-34-245-100-58.eu-west-1.compute.amazonaws.com
+       login_user: root
+       login_password: 'test@123'
+       login_unix_socket: /tmp/mysql.sock
+
+    - name: Create database user with name 'bob' and password '12345' with all database privileges
+      community.mysql.mysql_user:
+       name: bob
+       password: 12345
+       priv: '*.*:ALL'
+       state: present
+       login_user: root
+       login_password: 'test@123'
+      # host: ec2-34-245-100-58.eu-west-1.compute.amazonaws.com

@@ -1,0 +1,14 @@
+#[loadbalancer]
+#loadbalancer1 ansible_host=49.12.34.72 ansible_user=root
+
+[masters]
+master ansible_host=167.235.237.37 ansible_user=root
+#master1 ansible_host=159.69.247.153 ansible_user=root
+#master2 ansible_host=91.107.207.153 ansible_user=root
+
+[workers]
+worker1 ansible_host=49.12.75.51 ansible_user=root
+
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python3

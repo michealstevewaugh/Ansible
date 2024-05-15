@@ -1,0 +1,14 @@
+[Unit]
+Description=PostgreSQL Database Server
+After=network.target
+
+[Service]
+Type=forking
+User=ubuntu
+Group=ubuntu
+ExecStart=/usr/local/pgsql/bin/pg_ctl -D /var/lib/pgsql/14.11/data start
+ExecStop=/usr/local/pgsql/bin/pg_ctl -D /var/lib/pgsql/14.11/data stop
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
