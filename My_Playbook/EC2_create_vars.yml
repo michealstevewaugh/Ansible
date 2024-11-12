@@ -1,0 +1,152 @@
+---
+- name: EC2-instance
+  hosts: localhost
+  become: true
+  vars_files: EC2_vars.yml
+  tasks:
+    - name: create a VPC
+      amazon.aws.ec2_vpc_net:
+        name: Module_dev2
+        state: present
+        cidr_block: "{{ vpc_cidr_block }}"
+        region: "{{ region }}"
+        tags:
+          module: ec2_vpc_net
+          this: works
+        #tenancy: dedicated
+      register: vpc
+
+    - name: Print VPC ID
+      debug:
+        msg: "VPC ID: {{ vpc.vpc.id }}"
+
+    - name: create public_subnet
+      amazon.aws.ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ vpc.vpc.id }}"
+        cidr: "{{ public_subnet_cidr_block }}"
+        region: "{{ region }}"
+        az: "{{ az }}"
+        tags:
+          Name: public_subnet
+      register: public_subnet
+
+    - name: Print public_subnet ID
+      debug:
+        msg: "public_subnet ID: {{ public_subnet.subnet.id }}"
+
+    - name: create private_subnet
+      amazon.aws.ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ vpc.vpc.id }}"
+        cidr: "{{ private_subnet_cidr_block }}"
+        region: "{{ region }}"
+        az: "{{ az }}"
+        tags:
+          Name: private_subnet
+      register: private_subnet
+
+    - name: Print private_subnet ID
+      debug:
+        msg: "private_subnet ID: {{ private_subnet.subnet.id }}"
+
+
+    - name: create Internet gateway
+      amazon.aws.ec2_vpc_igw:
+        vpc_id: "{{ vpc.vpc.id }}"
+        state: present
+      register: igw_id
+
+    - name: Print igw ID
+      debug:
+        msg: "igw ID: {{ igw_id.gateway_id }}"
+
+    - name: Create new nat gateway and allocate new EIP if a nat gateway does not yet exist in the subnet.
+      amazon.aws.ec2_vpc_nat_gateway:
+        state: present
+        subnet_id: "{{ private_subnet.subnet.id }}"
+        wait: true
+       # region: ap-southeast-2
+        if_exist_do_not_create: true
+      register: nat_id
+
+    - name: Print nat_gateway ID
+      debug:
+        msg: "nat ID: {{ nat_id.nat_gateway_id }}"
+
+    - name: create public_route table using gateway
+      amazon.aws.ec2_vpc_route_table:
+        vpc_id: "{{ vpc.vpc.id }}"
+        state: present
+        tags:
+          name: public_route table
+        subnets:
+          - "{{ public_subnet.subnet.id }}"
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ igw_id.gateway_id }}"
+      register: public_route_table
+
+    - name: create private_route table using gateway
+      amazon.aws.ec2_vpc_route_table:
+        vpc_id: "{{ vpc.vpc.id }}"
+        state: present
+        tags:
+          name: private_route table
+        subnets:
+          - "{{ private_subnet.subnet.id }}"
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ nat_id.nat_gateway_id }}"
+      register: private_route_table
+
+    - name: example using security group rule descriptions
+      amazon.aws.ec2_security_group:
+        name: main_sg
+        description: sg with rule descriptions
+        vpc_id: "{{ vpc.vpc.id }}"
+        rules:
+          - proto: tcp
+            ports:
+              - 80
+            cidr_ip: 0.0.0.0/0
+            rule_desc: allow all on port 80
+      register: sg_id
+
+    - name: Print sg_id
+      debug:
+        msg: "sg ID: {{ sg_id.group_id }}"
+
+    - name: Create EC2 key pair
+      amazon.aws.ec2_key:
+        name: steve
+        region: "{{ region }}"
+        state: present
+#        overwrite: yes
+#      register: ec2_keypair
+
+    - name: start an instance with a public IP address
+      amazon.aws.ec2_instance:
+        name: "public-compute-instance"
+        key_name: steve
+        state: present
+        region: "{{ region }}"
+        count: 1
+        subnet_id: "{{ public_subnet.subnet.id }}"
+        instance_type: t3.small
+        security_group: "{{ sg_id.group_id }}"
+        image_id: "{{ ami }}"
+        #tags:
+         # Environment: Testing
+
+    - name: start an instance with a public IP address
+      amazon.aws.ec2_instance:
+        name: "private-compute-instance"
+        key_name: steve
+        state: present
+        region: "{{ region }}"
+        count: 1
+        subnet_id: "{{ private_subnet.subnet.id }}"
+        instance_type: t3.small
+        security_group: "{{ sg_id.group_id }}"
+        image_id: "{{ ami }}"
